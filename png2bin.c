@@ -40,7 +40,7 @@ static void do_work(const options_t *options, void *data, size_t filesize) {
 	uint8_t channels;
 	uint32_t padding;
 
-	const bool ok = png_load(options->input, &buffer, &buffer_size, &width, &height, &channels, &padding, options->pad_byte);
+	const bool ok = png_load(options->input, &buffer, &buffer_size, &width, &height, &channels, &padding);
 
 	if (ok) {
 		printf("Input file => %s\n  size => %zu bytes\n  image => %ux%u px, %d bpp, %upx padding\n",

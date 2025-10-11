@@ -34,13 +34,13 @@
 
 static void do_work(const options_t *options, void *data, size_t filesize) {
 	const uint8_t channels = 4;
-	const uint32_t width = ceil(sqrt(filesize / channels));
-	const uint32_t height = ceil(filesize / channels / width) + 1;
+	const uint32_t width = ceil(sqrt((double)filesize / channels));
+	const uint32_t height = ceil((double)filesize / channels / width);
 	const uint32_t padding = width * height * channels - filesize;
 
 	printf("Input file => %s\n  size => %zu bytes\n", options->input, filesize);
 
-	bool ok = png_save(options->output, data, width, height, channels, padding, options->pad_byte);
+	bool ok = png_save(options->output, data, width, height, channels, padding, options->pad_byte, filesize);
 	if (ok) {
 		printf("Output file => %s\n  size => %zu bytes\n  image => %ux%u px, %d bpp, %upx padding\n",
 			options->output, fsize(options->output), width, height, channels * 8, padding / channels);
