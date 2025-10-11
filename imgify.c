@@ -38,8 +38,9 @@ static uint8_t* pixel_at(uint8_t *data, uint32_t row, uint32_t col, uint32_t wid
 }
 
 #define PNG_SIG_SIZE 8
+#define ORIGINAL_SIZE_CHUNK_KEY "osz"
 
-bool png_load(const char *filename, uint8_t **out_buffer, size_t *out_buffer_size, uint32_t *out_width, uint32_t *out_height, uint8_t *out_channels, uint32_t *out_padding, uint8_t pad_byte) {
+bool png_load(const char *filename, uint8_t **out_buffer, size_t *out_buffer_size, uint32_t *out_width, uint32_t *out_height, uint8_t *out_channels, uint32_t *out_padding) {
 	// Open the file.
 	FILE *fp = fopen(filename, "rb");
 	if (fp == NULL) {
@@ -134,30 +135,37 @@ bool png_load(const char *filename, uint8_t **out_buffer, size_t *out_buffer_siz
 	// Read the entire image.
 	png_read_image(png_ptr, row_pointers);
 
+	// Finish reading
+	png_read_end(png_ptr, info_ptr);
+
+	size_t original_size = rowbytes * height; // Default to full image size (no padding)
+	uint32_t padding = 0;
+
+	png_textp text_ptr;
+	int num_text;
+
+	// Try to read original size from tEXt chunk
+	// If no original size chunk found, assume file perfectly fills the image (no padding)
+	if (png_get_text(png_ptr, info_ptr, &text_ptr, &num_text) > 0) {
+		for (int i = 0; i < num_text; i++) {
+			if (strcmp(text_ptr[i].key, ORIGINAL_SIZE_CHUNK_KEY) == 0) {
+				original_size = strtoull(text_ptr[i].text, NULL, 10);
+				padding = rowbytes * height - original_size;
+				break;
+			}
+		}
+	}
+
 	// Clean up.
 	free(row_pointers);
 	row_pointers = NULL;
 	png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 	fclose(fp);
 
-	// Calculate padding.
-	const uint8_t *last_row = pixel_at(data, height-1, 0, width, height, channels);
-	uint32_t padding = 0;
-	for (uint32_t i = 0; i < rowbytes; ++i) {
-		uint32_t column = rowbytes - i;
-		// Stop when the padding byte is no longer found.
-		if (last_row[column-1] != pad_byte) {
-			padding = i;
-			// printf("DEBUG: [png_load] Found %u pixels of padding (%u bytes), starting at row %u column %u\n",
-			// 	padding / channels, padding, height, column);
-			break;
-		}
-	}
-
 	if (out_buffer != NULL)
 		*out_buffer = data;
 	if (out_buffer_size != NULL)
-		*out_buffer_size = rowbytes * height - padding;
+		*out_buffer_size = original_size;
 	if (out_width != NULL)
 		*out_width = width;
 	if (out_height != NULL)
@@ -170,7 +178,7 @@ bool png_load(const char *filename, uint8_t **out_buffer, size_t *out_buffer_siz
 	return true;
 }
 
-bool png_save(const char *filename, uint8_t *data, uint32_t width, uint32_t height, uint8_t channels, uint32_t padding, uint8_t pad_byte) {
+bool png_save(const char *filename, uint8_t *data, uint32_t width, uint32_t height, uint8_t channels, uint32_t padding, uint8_t pad_byte, size_t original_size) {
 	assert(width > 0); // 1 column at least
 	assert(height > 0); // 1 row at least
 
@@ -222,6 +230,18 @@ bool png_save(const char *filename, uint8_t *data, uint32_t width, uint32_t heig
 	// Set the PNG header info.
 	png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, color_type,
 			PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+
+	// Add tEXt chunk with original file size only if padding is required
+	const size_t total_capacity = width * height * channels;
+	if (original_size < total_capacity) {
+		char size_text[32];
+		snprintf(size_text, sizeof(size_text), "%zu", original_size);
+		png_text text_chunk;
+		text_chunk.key = ORIGINAL_SIZE_CHUNK_KEY;
+		text_chunk.text = size_text;
+		text_chunk.compression = PNG_TEXT_COMPRESSION_NONE;
+		png_set_text(png_ptr, info_ptr, &text_chunk, 1);
+	}
 
 	// Write the info.
 	png_write_info(png_ptr, info_ptr);
